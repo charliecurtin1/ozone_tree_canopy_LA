@@ -13,19 +13,67 @@ knitr::opts_chunk$set(echo = TRUE)
 library(tidyverse)
 library(here)
 library(sf)
+library(modelr)
+library(knitr)
+library(broom)
+library(lubridate)
 ```
 
 ```{r}
 # read in tree canopy percentage by census tract
 tree_canopy <- read_csv(here("data", "2016 Tree Canopy Cover Calculations_a.csv"))
 
-# read in CalEnviroScreen data
-enviroscreen <- st_read(here("data", "calenviroscreen40shpf2021shp", "CES4 Final Shapefile.shp")) %>% 
-  filter(County == "Los Angeles")
+# read in CalEnviroScreen data from 2016
+enviroscreen <- st_read(here("data", "CESJune2018Update_SHP", "CES3June2018Update.shp"), quiet = TRUE)
+
+# read in ozone data
+ozone <- read_csv(here("data", "ds.input.aqs.o3.2016.csv"))
+
+# find monthly mean for ozone
+ozone <- ozone %>% 
+  mutate(year = year(Date),
+         month = month(Date),
+         ym = my(Date))
+
+length(unique(ozone$Site))
+
+# read in ozone data
+ozone_epa <- read_csv(here("data", "8hour_44201_2016.csv"))
 
 # probably want to select the just the variables I'm interested in
 ```
 
 ```{r}
-# 
+# check that census tract IDs are the same?
+# finds all rows in tree canopy that aren't in tracts_trees (the rows we lost)
+difference <- setdiff(tree_canopy$geoid20, tracts_trees$tract)
+
+# create a subset of our difference 
+enviroscreen_diff <- tree_canopy %>% 
+  filter(geoid20 %in% difference)
+```
+
+-   we have a difference of 477 census tracts, or 477 unmatched IDs
+-   check the metadata to see how tract IDs were found
+
+```{r}
+# merge the two dataframes
+tracts_trees <- merge(enviroscreen, tree_canopy, by.x = "tract", by.y = "geoid20")
+
+# regress ozone on canopy cover and traffic proximity
+trees_ozone_mod <- lm(ozoneP ~ existing_canopy_pct, data = tracts_trees)
+
+summary(trees_ozone_mod)
+```
+
+```{r}
+# plot geom smooth with tracts trees 
+tracts_trees %>% 
+  ggplot(aes(x = existing_canopy_pct, y = ozoneP)) +
+  geom_point() +
+  geom_smooth(method = "lm",
+              color = "red") + 
+  labs(x = "canopy cover (percent)",
+       y = "ozone percentile") +
+  theme_bw()
 ```
