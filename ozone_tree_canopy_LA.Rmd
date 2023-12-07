@@ -40,6 +40,10 @@ length(unique(ozone$Site))
 # read in ozone data
 ozone_epa <- read_csv(here("data", "8hour_44201_2016.csv"))
 
+# LA ozone 2016
+la_ozone <- read_csv(here("data", "ad_viz_plotval_data.csv"))
+# not necessarily complete time series?
+
 # probably want to select the just the variables I'm interested in
 ```
 
