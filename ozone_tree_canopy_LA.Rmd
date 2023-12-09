@@ -8,6 +8,8 @@ date: "2023-12-05"
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+Background - Ozone and tree canopy cover
+
 ```{r, message = FALSE}
 # import packages
 library(tidyverse)
@@ -24,7 +26,7 @@ library(lubridate)
 tree_canopy <- read_csv(here("data", "2016 Tree Canopy Cover Calculations_a.csv"))
 
 # read in CalEnviroScreen data from 2016
-enviroscreen <- st_read(here("data", "CESJune2018Update_SHP", "CES3June2018Update.shp"), quiet = TRUE)
+enviroscreen <- st_read(here("data", "calenviroscreen40shpf2021shp", "CES4 Final Shapefile.shp"), quiet = TRUE)
 
 # read in ozone data
 ozone <- read_csv(here("data", "ds.input.aqs.o3.2016.csv"))
