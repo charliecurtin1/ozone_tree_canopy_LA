@@ -19,6 +19,9 @@ library(modelr)
 library(knitr)
 library(broom)
 library(lubridate)
+
+# disable scientific notation
+options(scipen = 999)
 ```
 
 ```{r}
@@ -26,60 +29,259 @@ library(lubridate)
 tree_canopy <- read_csv(here("data", "2016 Tree Canopy Cover Calculations_a.csv"))
 
 # read in CalEnviroScreen data from 2016
-enviroscreen <- st_read(here("data", "calenviroscreen40shpf2021shp", "CES4 Final Shapefile.shp"), quiet = TRUE)
+enviroscreen <- st_read(here("data", "calenviroscreen40shpf2021shp", "CES4 Final Shapefile.shp"), quiet = TRUE) %>% 
+  filter(County == "Los Angeles")
 
-# read in ozone data
-ozone <- read_csv(here("data", "ds.input.aqs.o3.2016.csv"))
-
-# find monthly mean for ozone
-ozone <- ozone %>% 
-  mutate(year = year(Date),
-         month = month(Date),
-         ym = my(Date))
-
-length(unique(ozone$Site))
-
-# read in ozone data
-ozone_epa <- read_csv(here("data", "8hour_44201_2016.csv"))
-
-# LA ozone 2016
-la_ozone <- read_csv(here("data", "ad_viz_plotval_data.csv"))
-# not necessarily complete time series?
-
-# probably want to select the just the variables I'm interested in
+# # read in ozone data
+# ozone <- read_csv(here("data", "ds.input.aqs.o3.2016.csv"))
+# 
+# # find monthly mean for ozone
+# ozone <- ozone %>% 
+#   mutate(year = year(Date),
+#          month = month(Date),
+#          ym = my(Date))
+# 
+# length(unique(ozone$Site))
+# 
+# # read in ozone data
+# ozone_epa <- read_csv(here("data", "8hour_44201_2016.csv"))
+# 
+# # LA ozone 2016
+# la_ozone <- read_csv(here("data", "ad_viz_plotval_data.csv"))
+# # not necessarily complete time series?
+# 
+# # probably want to select the just the variables I'm interested in
 ```
 
 ```{r}
-# check that census tract IDs are the same?
-# finds all rows in tree canopy that aren't in tracts_trees (the rows we lost)
-difference <- setdiff(tree_canopy$geoid20, tracts_trees$tract)
+# explore the data
+head(tree_canopy)
 
-# create a subset of our difference 
-enviroscreen_diff <- tree_canopy %>% 
-  filter(geoid20 %in% difference)
+# print column names
+names(enviroscreen)
+
+# select variables of interest
+enviroscreen <- enviroscreen %>% 
+  select(Tract, Ozone, OzoneP, Traffic, TrafficP, Shape_Leng, Shape_Area, geometry) %>% 
+  mutate(Traffic = na_if(Traffic, -999))
+
+# make column names lowercase
+names(enviroscreen) <- tolower(names(enviroscreen))
 ```
 
--   we have a difference of 477 census tracts, or 477 unmatched IDs
+- We want to explore ozone a bit first. Background on ozone. Acute risks include, chronic exposure includes.
+- in 2015, the EPA set the ground level ozone standard to be .07 ppm, averaged over an 8 hour period
+  - look at this in time-series data and identify sensors that exceeded this over the year?
+
+
+```{r}
+# plot histogram to show distribution of ozone concentrations 
+ggplot(enviroscreen) +
+  geom_histogram(aes(x = ozone),
+                 bins = 30) +
+  geom_vline(xintercept = .07,
+             color = "red")
+```
+- so actually none of our census tracts exceed that. But what causes ground-level ozone, or smog? Prior research tells us that traffic plays a major role, but that trees may also be important in allowing ozone to stabilize as ozone
+- And could the measurement of ozone be hiding something? Ozone is a short-term pollutant, with concentrations changing over the span of a few hours. Acute exposure is still damaging, and perhaps there's a seasonal component to ozone that. With values measured as the mean of the daily maximum 8-hour ozone concentration averaged over three years for the summer months (May - October), should we extract some concerning maximums? Chronic exposure is concerning, but acute exposure leads to increased health risks 
+
+- So let's first take a look at what plays a role in the formation of ozone.
+- relationship between tree canopy cover and ozone
+
+
+```{r}
+# our dataframes have a difference of 150 observations
+length(setdiff(enviroscreen$tract, tree_canopy$geoid20))
+
+# merge the two dataframes
+tracts_trees <- merge(enviroscreen, tree_canopy, by.x = "tract", by.y = "geoid20")
+```
+
+-   we have a difference of 327 census tracts, or 327 unmatched census tracts
 -   check the metadata to see how tract IDs were found
 
 ```{r}
-# merge the two dataframes
-tracts_trees <- merge(enviroscreen, tree_canopy, by.x = "tract", by.y = "geoid20")
-
-# regress ozone on canopy cover and traffic proximity
-trees_ozone_mod <- lm(ozoneP ~ existing_canopy_pct, data = tracts_trees)
-
-summary(trees_ozone_mod)
+# run some tests to see if we should conduct a simple linear regression
+# exogeneity- there is no other variable correlated with X that also affects Y
 ```
 
 ```{r}
-# plot geom smooth with tracts trees 
+# plot geom smooth with tracts trees and existing canopy cover
 tracts_trees %>% 
-  ggplot(aes(x = existing_canopy_pct, y = ozoneP)) +
+  ggplot(aes(x = existing_canopy_pct, y = ozone)) +
   geom_point() +
   geom_smooth(method = "lm",
-              color = "red") + 
+              color = "red",
+              formula = y ~ x) + 
   labs(x = "canopy cover (percent)",
-       y = "ozone percentile") +
+       y = "ozone (ppm)") +
   theme_bw()
 ```
+
+```{r}
+# regress ozone on canopy cover and traffic proximity
+trees_ozone_mod <- lm(ozone ~ existing_canopy_pct, data = tracts_trees)
+
+summary(trees_ozone_mod)
+```
+- For census tracts with 0% tree canopy cover, we expect to see ozone concentrations of .047 ppm
+- For each one percentage point increase in tree canopy cover, we expect to see ozone concentrations increase by .0003 ppm
+- p-value shows statistical significance
+- R^2 shows that tree canopy cover only explains about 7.5% of the variance in ozone concentrations
+- but what else drives ozone? we know traffic does
+
+```{r}
+tracts_trees %>% 
+  ggplot(aes(x = traffic, y = ozone)) +
+  geom_point() +
+  geom_smooth(method = "lm",
+              color = "red",
+              formula = y ~ x) + 
+  labs(x = "traffic (vehicles/hour)",
+       y = "ozone (ppm)") +
+  theme_bw()
+```
+- this shows that there is almost no correlation between traffic and ozone. But let's look at it to see if we can add it to our model
+
+```{r}
+# find correlation between traffic and tree cover
+cor(tracts_trees$traffic, tracts_trees$existing_canopy_pct, use = "na.or.complete")
+```
+- there is almost no correlation between these two variables, so we might as well add it and 
+
+```{r}
+traffic_ozone_mod <- lm(ozone ~ traffic, data = tracts_trees)
+
+summary(traffic_ozone_mod)
+```
+- For census tracts with no traffic, we expect ozone concentrations to be .05 ppm
+- For each 1 vehicle increase in traffic volume, we expect to see ozone concentrations increase by a tiny amount
+- Our R^2 indicates that there 
+
+
+```{r}
+# visualize our residuals to test the assumption that our errors are independently distributed
+# save regression to our model
+predictions <- tracts_trees %>% 
+  add_predictions(trees_ozone_mod) %>% 
+  mutate(residuals = ozone - pred)
+
+# plot our residuals to see if they are normally distributed
+ggplot(predictions,
+       aes(x = residuals)) +
+  geom_histogram(color = "black",
+                 fill = "seagreen",
+                 bins = 30) +
+  theme_classic()
+```
+- our residuals appear to be normally distributed
+
+```{r}
+# plot geom smooth with tracts trees and existing canopy cover
+tracts_trees %>% 
+  ggplot(aes(x = existing_canopy_pct, y = ozone)) +
+  geom_point() +
+  geom_smooth(method = "lm",
+              color = "red",
+              formula = y ~ x) + 
+  labs(x = "canopy cover (percent)",
+       y = "ozone (ppm)") +
+  theme_bw()
+```
+- the relationship between canopy cover and ozone appears to be linear
+
+
+```{r}
+# plot geom smooth with tracts trees  and traffic proximity
+tracts_trees %>% 
+  ggplot(aes(x = traffic, y = ozone)) +
+  geom_point() +
+  geom_smooth(method = "lm",
+              color = "red",
+              formula = y ~ x) + 
+  labs(x = "traffic (vehicles/hour)",
+       y = "ozone (ppm)") +
+  theme_bw()
+```
+
+
+
+
+Part 2: time series
+
+- maybe switch to part 1
+- so let's just focus on ozone and tree canopy cover
+- logic: there may be an important seasonal component to ozone missing
+- ideas: conduct OLS for may- october
+
+```{r}
+# read in our time-series ozone data
+# LA ozone 2016
+la_ozone <- read_csv(here("data", "ad_viz_plotval_data.csv")) %>% 
+  rename(ozone = "Daily Max 8-hour Ozone Concentration")
+
+# clean up column names
+names(la_ozone) <- names(la_ozone) %>% 
+  tolower() %>% 
+  str_replace_all(" ", "_")
+
+```
+
+- this data describes 
+
+```{r}
+# explore the data
+
+length(unique(la_ozone$site_id))
+```
+
+- we need to prep our time series data
+
+```{r}
+la_ozone$date <- la_ozone$date %>% 
+  str_replace_all("/", "-")
+
+# convert to a datetime object
+la_ozone$date <- as_datetime(la_ozone$date, format = "%m-%d-%Y") 
+
+## parse to find mean over each day
+# parse the month and the day
+la_ozone <- la_ozone %>% 
+  mutate(month = month(date, label = TRUE),
+         day = day(date))
+
+# find the mean on each day of the year
+daily_mean <- la_ozone %>% 
+  group_by(date) %>% 
+  summarize(daily_ozone_mean = mean(ozone))
+
+ggplot(daily_mean,
+       aes(x = date, y = daily_ozone_mean)) +
+  geom_point()
+
+
+# plot the daily data
+ggplot(data = la_ozone, aes(month, ozone)) +
+  
+
+# plot our ozone data
+la_ozone %>% 
+  mutate(date = as_datetime(date)) %>%  # year from lubridate package
+  ggplot(aes(month, ozone)) +
+  stat_summary(geom = 'line', fun = "mean") + # creates the statistic of y at the x level (of whatever you pass into aes of ggplot)
+  geom_smooth(se = FALSE, color = "blue") +
+  labs(x = "month", "Monthly mean ozone")
+```
+
+- ideas- plot time series over May - October
+- ideas- plot over the whole year
+  - group by day?
+
+
+- our plot indicates that there might be a seasonal component
+  - I think i should grab data from 2017-2019 (same timeframe as the cal enviroscreen)
+
+
+
+
+
