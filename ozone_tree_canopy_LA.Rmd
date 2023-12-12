@@ -339,7 +339,7 @@ la_county_border <- enviroscreen %>%
 ggplot() +
   geom_sf(data = viable_monitors, color = "red") +
   geom_sf(data = la_county_border, fill = NA) +
-  theme_bw() +
+  theme_classic() +
   labs(title = "Viable Ozone Monitors for Kriging")
 ```
 
