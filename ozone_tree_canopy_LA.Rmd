@@ -20,6 +20,8 @@ library(knitr)
 library(broom)
 library(lubridate)
 library(tmap)
+library(tsibble)
+library(feasts)
 
 # disable scientific notation
 options(scipen = 999)
@@ -83,11 +85,9 @@ ggplot(enviroscreen) +
                  bins = 30,
                  color = "black",
                  fill = "seagreen") +
-  geom_vline(xintercept = .07,
-             color = "red") +
   labs(x = "ozone (ppm)",
        y = "count",
-       title = "ozone concentrations by census tract")
+       title = "Ozone Concentration Frequency") +
   theme_bw()
 ```
 
@@ -123,7 +123,8 @@ tracts_trees %>%
               formula = y ~ x,
               se = FALSE) + 
   labs(x = "canopy cover (percent)",
-       y = "ozone (ppm)") +
+       y = "ozone (ppm)",
+       title = "Canopy Cover and Ozone by Census Tract in LA County") +
   theme_bw()
 ```
 
@@ -136,7 +137,8 @@ tracts_trees %>%
               formula = y ~ x,
               se = FALSE) + 
   labs(x = "traffic (vehicles/hour)",
-       y = "ozone (ppm)") +
+       y = "ozone (ppm)",
+       title = "Traffic Volume and Ozone by Census Tract in LA County") +
   theme_bw()
 ```
 
@@ -349,7 +351,7 @@ Part 2: time series
 
 -   the assumption underlying this omission of the winter months is that ozone concentrations are generally higher in the summer
 
--   but I wanted to look at the strength of the seasonal component
+-   but I wanted to look at the strength of this seasonal component
 
 ```{r}
 # read in our time-series ozone data
@@ -394,36 +396,59 @@ ozone_3yr$date <- as_datetime(ozone_3yr$date, format = "%m-%d-%Y")
 
 ozone_3yr$date <- as_datetime(ozone_3yr$date) 
 
-## parse to find mean over each day
-# parse the month and the day
-monthly_mean <- ozone_3yr %>% 
-  mutate(month = month(date, label = TRUE))
-
-# find the mean on each day of the year
-daily_mean <- la_ozone %>% 
-  group_by(date) %>% 
-  summarize(daily_ozone_mean = mean(ozone))
-
-ggplot(daily_mean,
-       aes(x = date, y = daily_ozone_mean)) +
-  geom_point()
-
-
-# plot the daily data
-ggplot(data = la_ozone, aes(month, ozone)) +
+## 
+# parse the month and the year
+ozone_3yr <- ozone_3yr %>% 
+  mutate(month = month(date, label = TRUE),
+         year = year(date)) %>% 
+  mutate(mo_yr = yearmonth(date))
   
 
-# plot our ozone data
-la_ozone %>% 
-  mutate(date = as_datetime(date)) %>%  # year from lubridate package
-  ggplot(aes(month, ozone)) +
-  stat_summary(geom = 'line', fun = "mean") + # creates the statistic of y at the x level (of whatever you pass into aes of ggplot)
-  geom_smooth(se = FALSE, color = "blue") +
-  labs(x = "month", "Monthly mean ozone")
+# find the mean for each month
+monthly_mean <- ozone_3yr %>% 
+  group_by(mo_yr) %>% 
+  summarize(daily_ozone_mean = mean(ozone, na.rm = TRUE)) %>% 
+  as_tsibble(index = mo_yr)
+
+# plot the monthly data
+ggplot(monthly_mean,
+       aes(x = mo_yr, y = daily_ozone_mean)) +
+  geom_line() +
+  theme_bw() +
+  labs(x = "year",
+       y = "monthly mean ozone")
+
+# plot daily data
+ggplot(ozone_3yr,
+       aes(x = date, y = ozone)) +
+  geom_point(size = .5) 
 ```
 
--   ideas- plot time series over May - October
--   ideas- plot over the whole year
-    -   group by day?
+-   
 -   our plot indicates that there might be a seasonal component
     -   I think i should grab data from 2017-2019 (same timeframe as the cal enviroscreen)
+    -   so lets decomp our time series data
+
+```{r}
+# decompose our time series
+ozone_dcmp <- monthly_mean %>% 
+  model(classical_decomposition(daily_ozone_mean, type = "additive"))
+
+
+# plot the decomp components
+components(ozone_dcmp) %>% 
+  autoplot()
+```
+
+```{r}
+# plot the lag components
+acf(monthly_mean, lag.max = 12)
+```
+
+-   There a statistically significant, positive correlation between lag t and lags t-2, t-11, and t-12.
+
+-   there is a statistically significant, negative correlation between lag t and lags t-5, t-6, t-7, and t-8.
+
+-   What the prior research tells us is that ozone is higher in the summer due to increased temperature and sunlight, and now we can see the strength of the relationship
+
+    -   our data for cal enviroscreen is attempting to assign a score to each census tract, so it makes sense that the winter months are left out- we are only looking at the highest values for ozone
