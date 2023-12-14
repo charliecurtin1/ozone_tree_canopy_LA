@@ -43,6 +43,7 @@ library(tmap)
 library(tsibble)
 library(feasts)
 library(cowplot)
+library(stargazer)
 
 # disable scientific notation
 options(scipen = 999)
@@ -68,13 +69,15 @@ names(enviroscreen) <- tolower(names(enviroscreen))
 tracts_trees <- merge(enviroscreen, tree_canopy, by.x = "tract", by.y = "geoid20")
 ```
 
-## Preliminary Data Analysis and Visualization
+## Linear Regression
+
+### Preliminary Data Analysis, Preparation, and Visualization
 
 To prepare my data for linear regression, I first merged my CalEnviroScreen 4.0 and tree canopy cover datasets by census tract ID. During the merge, we lose around 350 census tracts due to mismatched IDs. IDs may have been updated between the different temporal ranges of our datasets. We're still left with measurements for ozone, traffic volume, and percent tree canopy cover in 2,016 census tracts, which is a large enough sample to conduct our linear regression.
 
 Next, I explored my data to see if it meets the assumptions to conduct Ordinary Least Squares regression. Plotting the distribution of my dependent variable, we can see that ozone is not distributed normally. The distribution is bimodal. Since there's no major skew, we can't easily transform our data logarithmically.
 
-```{r, fig.cap = "Figure 1: Histogram of ozone concentrations in LA County census tracts"}
+```{r, fig.cap = "***Figure 1: Histogram of ozone concentrations in LA County census tracts***"}
 # plot histogram to show distribution of ozone concentrations in census tracts
 ggplot(enviroscreen) +
   geom_histogram(aes(x = ozone),
@@ -86,8 +89,10 @@ ggplot(enviroscreen) +
        title = "Ozone Concentration Frequency") +
   theme_bw()
 ```
+
 Then, I plotted two scatterplots of my independent variables, traffic volume and percent tree canopy cover, against ozone concentrations
-```{r, warning = FALSE, fig.cap = "Figure 2: Percent tree canopy cover (A) and traffic volume (B) plotted against ozone concentrations in census tracts in LA County. Regression line plotted to show correlation"}
+
+```{r, warning = FALSE, fig.cap = "***Figure 2: Percent tree canopy cover (A) and traffic volume (B) plotted against ozone concentrations in census tracts in LA County. Regression line plotted to show correlation***"}
 # plot percent canopy cover against ozone
 trees_scatter <- tracts_trees %>% 
   ggplot(aes(x = existing_canopy_pct, y = ozone)) +
@@ -115,7 +120,8 @@ traffic_scatter <- tracts_trees %>%
 # arrange the plots side-by-side
 plot_grid(trees_scatter, traffic_scatter, labels = "AUTO")
 ```
-By plotting a correlation line using `geom_smooth()` in our `ggplot` code, we notice a positive correlation between percent canopy cover and ozone concentrations, but no correlation between traffic volume and ozone. 
+
+By plotting a correlation line using `geom_smooth()` in our `ggplot` code, we notice a positive correlation between percent canopy cover and ozone concentrations, but no correlation between traffic volume and ozone.
 
 Before running our regression model, let's test for multicollinearity between our independent variables.
 
@@ -123,42 +129,52 @@ Before running our regression model, let's test for multicollinearity between ou
 # find correlation between traffic volume and percent tree canopy cover
 print(paste("r:", round(cor(tracts_trees$traffic, tracts_trees$existing_canopy_pct, use = "na.or.complete"), digits = 3)))
 ```
+
 There is almost no correlation between our independent variables, so let's add them to our model and conduct a multiple linear regression, predicting ozone concentrations with percent tree canopy cover and traffic volume.
 
-```{r}
-# regress ozone on canopy cover and traffic
+### Multiple Linear Regression
+
+```{r, warning = FALSE, results = 'asis'}
+# multiple linear regression, predicting ozone with percent tree canopy cover and traffic volume
 trees_traffic_mod <- lm(ozone ~ existing_canopy_pct + traffic, data = tracts_trees)
 
-summary(trees_traffic_mod)
+# output our regression results
+stargazer(trees_traffic_mod,
+          type = "html",
+          title = "ozone ~ percent canopy cover + traffic volume",
+          align = TRUE,
+          covariate.labels = c("canopy cover (%)", "traffic volume (vehicles/hour)"),
+          omit.stat = c("F", "ser", "aic"),
+          single.row = TRUE)
 ```
 
--   Our intercept means that for census tracts with 0% canopy cover and no traffic, we expect to see ozone concentrations at .047 ppm.
+***Table 1: Multiple linear regression predicting ozone concentrations in census tracts with percent canopy cover and traffic volume. Output formatted with `stargazer`***
 
--   Our B1 means that for each 1 percentage point increase in canopy cover, holding traffic constant, we expect to see ozone concentrations increase by .00027 ppm
+At first glance, we can see that the asterisks next to canopy cover indicate that canopy cover and ozone have a statistically significant relationship at a significance level of .01, but there is no statistically significant relationship between traffic volume and ozone. Let's take traffic volume out of our model and run a simple linear regression.
 
--   Our B2 means that for each 1 vehicle per hour increase, holding canopy cover constant, we expect to see ozone concentrations increase by a tiny amount
+### Simple Linear Regression
 
--   Our Adjusted R\^2 tells us that around 7.7% of the variation in ozone in census tracts is explained by tree canopy cover and traffic.
-
--   However, we see that traffic has a p-value of .5, which means it has no statistically significant relationship with ozone concentrations, so let's take it out of our model
-
--   Now let's run a simple linear regression using tree canopy cover and ozone
-
-```{r}
-# regress ozone on canopy cover and traffic proximity
+```{r, warning = FALSE, results = 'asis'}
+# simple linear regression, predicting ozone concentrations with percent tree canopy cover
 trees_ozone_mod <- lm(ozone ~ existing_canopy_pct, data = tracts_trees)
 
-summary(trees_ozone_mod)
+# output our regression results
+stargazer(trees_ozone_mod,
+          type = "html",
+          title = "ozone ~ percent canopy cover",
+          align = TRUE,
+          covariate.labels = c("canopy cover (%)"),
+          omit.stat = c("F", "ser", "aic"),
+          single.row = TRUE)
 ```
 
--   Our intercepts don't change all that much, but we can see that adding traffic did actually mechanically increase our R\^2 value a bit
--   For census tracts with 0% tree canopy cover, we expect to see ozone concentrations of .047 ppm
--   For each one percentage point increase in tree canopy cover, we expect to see ozone concentrations increase by .0003 ppm
--   Our output shows that although tree canopy cover only explains about 7.5% of the variation in ozone concentrations, there is a statistically significant relationship between our independent and dependent variables at a significance level of .001.
--   now lets plot our residuals and test for homoskedasticity
+***Table 2: Simple linear regression predicting ozone concentrations in census tracts with percent canopy cover. Output formatted with `stargazer`***
 
-```{r}
-# visualize our residuals to test the assumption that our errors are independently distributed
+Our intercept means that for census tracts with 0% canopy cover, we expect to see ozone concentrations of .047 ppm. Our canopy cover coefficient means that for each 1 percentage point increase in canopy cover, we would expect to see a census tract's ozone concentration increase by .0003 ppm. Our R^2^ value means that around 7.5% of the variation in ozone in census tracts in LA County can be explained by percent tree canopy cover alone.
+
+Even though there's a statistically significant relationship between ozone and percent tree canopy cover, our model seems to tell us that tree canopy cover doesn't drive ozone all that much. Let's plot the residuals of our model to see if they are normally distributed.
+
+```{r, fig.cap = "***Figure 3: Histogram of simple linear regression residuals***"}
 # save regression to our model
 predictions <- tracts_trees %>% 
   add_predictions(trees_ozone_mod) %>% 
@@ -170,162 +186,22 @@ ggplot(predictions,
   geom_histogram(color = "black",
                  fill = "seagreen",
                  bins = 30) +
-  theme_classic()
+  theme_bw() +
+  labs(title = "Ozone ~ Percent Canopy Cover Residuals Frequency")
 ```
 
-```{r}
-# plot a q-q plot of our residuals
-plot(trees_ozone_mod)
-```
+We can see that our residuals are not normally distributed, but follow a bimodal distribution. This means that our model may be suffering from omitted variable bias. Prior research^2^ tells us that there are other factors that drive ozone, such as sunlight and temperature. 
 
--   from the q-q plot and the histogram, we can see that our residuals don't follow a normal distribution
+## Time Series Analysis
 
--   
+### Preliminary Data Analysis, Preparation, and Visualization
 
--   scale-location: used to check the homoscedasticity of residuals (equal variance of residuals)
+Recall that the ozone variable in CalEnviroScreen 4.0 is the maximum daily concentration averaged over May-October for the years 2017-2019. Digging into the metadata for the dataset, the underlying assumption is that ozone concentrations are higher during the summer months. By retrieving the US EPA Air Quality System daily ozone monitoring data for the entire three-year span, we can assess the seasonality of ozone.
 
-    -   ideally what we would see is these residuals spread seemingly randomly around a horizontal line
+The US EPA AQS data is downloaded as three separate .csv files for 2017, 2018, and 2019. Since the dataframes share identical column names, we can simply stack them together in one dataframe using `rbind()`.
 
-    -   what we do see is that the variance of the residuals at lower predicted values is much greater than the spread of residuals at higher predicted values
-
-    -   so, essentially, the variance of our predicted variables are not constant as a function of predicted values, with larger variance at lower predicted values
-
-    -   what could this effect be? - the omission of variables in our model- there are other factors that play into the formation of ozone, such as sunlight and temperature that may have a strong influence on ozone
-
--   what we do see is the
-
--   even if we log transform ozone, the residuals don't change much
-
-    -   you shouldn't even transform bimodal data
-
--   
-
-<!-- -->
-
--   so what happens when our residuals are not normally distributed?
-
-```{r}
-# check for homoscedasticity
-# scatterplot of residuals against our dependent variable
-ggplot(predictions, aes(x = pred, y = residuals)) +
-  geom_point() +
-  geom_smooth(se = FALSE,
-              color = "red") +
-  labs(x = "predicted ozone value (ppm)")
-```
-
--   our residual variance is clearly not constant across the fitted values
-
-```{r}
-# visualize our residuals to test the assumption that our errors are independently distributed
-# save regression to our model
-predictions <- tracts_trees %>% 
-  add_predictions(trees_ozone_mod) %>% 
-  mutate(residuals = ozone - pred)
-
-# plot our residuals to see if they are normally distributed
-ggplot(predictions,
-       aes(x = residuals)) +
-  geom_histogram(color = "black",
-                 fill = "seagreen",
-                 bins = 30) +
-  theme_classic()
-```
-
-Pt 2:
-
-If we look at the distribution of ozone concentrations, you'll notice this strange binning. Why is this? Well let's dig into how this data was created
-
--   But I digress: slaying the kriging beast??
-
-```{r}
-# plot ozone concentrations
-tracts_trees %>% 
-  ggplot(aes(x = existing_canopy_pct, y = ozone)) +
-  geom_point() +
-  labs(x = "canopy cover (percent)",
-       y = "ozone (ppm)") +
-   geom_smooth(method = "lm",
-              color = "red",
-              formula = y ~ x,
-              se = FALSE) + 
-  theme_bw()
-```
-
--   We notice this binning effect of our data. How can ozone, a continuous variable show so many repeated values in census tracts
-
--   well, ozone values were actually assigned to census tracts through kriging. data from monitoring stations is taken, and then they use kriging to assign the value of ozone at the centroid of a census tract to that census tract. For census tracts farther than 50 km of a station, the value for the nearest station was used. So what we might be seeing are census tracts far from a station being assigned the nearest value of a station, or that dropoff of the effectiveness of kriging
-
--   let's look at where these monitors are:
-
--   a quick regression digression: lifting the kriging veil
-
-```{r}
-# read in our monitors data
-monitors_ca <- read_csv(here("data", "ca_ozone_2017.csv"))
-
-# update column names
-names(monitors_ca) <- names(monitors_ca) %>% 
-  tolower() %>% 
-  str_replace_all(" ", "_")
-
-# simply get the locations of the monitors
-monitor_locations <- monitors_ca %>% 
-  group_by(site_latitude, site_longitude) %>% 
-  summarize(count = n())
-
-# turn into an sf object
-monitor_locations <- st_as_sf(monitors_ca, 
-                              coords = c("site_longitude", "site_latitude"),
-                              crs = 4326)
-
-# group_by site name
-monitor_locations <- monitor_locations %>% 
-  group_by(site_name) %>% 
-  summarize(count = n())
-
-# get la county buffer
-la_county_buffer <- enviroscreen %>% 
-  st_buffer(dist = 50000) %>% 
-  st_union() %>%
-  st_as_sf() %>%
-  st_make_valid()
-
-# transform one more time
-
-la_county_buffer <- st_transform(la_county_buffer, crs = 4326)
-
-# subset to find monitor locations that overlap with the buffer
-viable_monitors <- monitor_locations[la_county_buffer, ]
-```
-
-```{r}
-# get la county border
-la_county_border <- enviroscreen %>% 
-  st_buffer(10) %>% 
-  st_union() %>% 
-  st_sf()
-
-# plot them together
-ggplot() +
-  geom_sf(data = viable_monitors, color = "red") +
-  geom_sf(data = la_county_border, fill = NA) +
-  theme_classic() +
-  labs(title = "Viable Ozone Monitors for Kriging")
-```
-
--   I don't know how you feel Tamma, but I think that could explain some of our binning of a continuous variable
-
-Part 2: time series
-
--   so our ozone variable was created by averaging the daily 8 hour max ozone concentration over the months of may- october for 2017-2019, and then kriging
-
--   the assumption underlying this omission of the winter months is that ozone concentrations are generally higher in the summer
-
--   but I wanted to look at the strength of this seasonal component
-
-```{r}
-# read in our time-series ozone data
+```{r, message = FALSE, warning = FALSE}
+## read in our time-series ozone data
 # LA ozone 2017
 la_ozone_2017 <- read_csv(here("data", "la_ozone_2017.csv")) %>% 
     rename(ozone = "Daily Max 8-hour Ozone Concentration")
@@ -340,24 +216,16 @@ la_ozone_2019 <- read_csv(here("data", "la_ozone_2019.csv")) %>%
 
 # rbind our CSVs together
 ozone_3yr <- rbind(la_ozone_2017, la_ozone_2018, la_ozone_2019)
+```
 
+Using the `lubridate` package, we can turn our date column into a `datetime` object. This will allow us to group our observations by month and take the monthly mean from January 2017-December 2019. Let's make a simple time series plot of monthly mean ozone to see evidence of a seasonal component.
+
+```{r, fig.cap = "***Figure 4: Time series of monthly mean ozone (ppm) from January 2017-December 2019***"}
 # clean up column names
 names(ozone_3yr) <- names(ozone_3yr) %>% 
   tolower() %>% 
   str_replace_all(" ", "_")
-```
 
--   this data describes
-
-```{r}
-# explore the data
-
-length(unique(ozone_3yr$site_id))
-```
-
--   we need to prep our time series data
-
-```{r}
 # replace slashes with hyphens
 ozone_3yr$date <- ozone_3yr$date %>% 
   str_replace_all("/", "-")
@@ -365,15 +233,11 @@ ozone_3yr$date <- ozone_3yr$date %>%
 # convert to a datetime object
 ozone_3yr$date <- as_datetime(ozone_3yr$date, format = "%m-%d-%Y") 
 
-ozone_3yr$date <- as_datetime(ozone_3yr$date) 
-
-## 
 # parse the month and the year
 ozone_3yr <- ozone_3yr %>% 
   mutate(month = month(date, label = TRUE),
          year = year(date)) %>% 
   mutate(mo_yr = yearmonth(date))
-  
 
 # find the mean for each month
 monthly_mean <- ozone_3yr %>% 
@@ -387,42 +251,52 @@ ggplot(monthly_mean,
   geom_line() +
   theme_bw() +
   labs(x = "time",
-       y = "monthly mean ozone",
+       y = "monthly mean ozone (ppm)",
        title = "LA County Monthly Mean Ozone Concentrations")
-
-# plot daily data
-ggplot(ozone_3yr,
-       aes(x = date, y = ozone)) +
-  geom_point(size = .5) 
 ```
 
--   
+Our time series plot shows evidence of seasonality, with mean monthly ozone concentrations peaking during summer and dropping during winter. Assuming our seasonality occurs during a one-year period, we can plot an autocorrelation function with 12 lags to look at the strength of this seasonality.
 
--   our plot indicates that there might be a seasonal component
-
-    -   I think i should grab data from 2017-2019 (same timeframe as the cal enviroscreen)
-    -   so lets decomp our time series data
-
-```{r}
-# decompose our time series
-ozone_dcmp <- monthly_mean %>% 
-  model(classical_decomposition(daily_ozone_mean, type = "additive"))
-
-
-# plot the decomp components
-components(ozone_dcmp) %>% 
-  autoplot()
+```{r, fig.cap = "***Figure 5: Autocorrelation of monthly mean ozone in LA County from 2017-2019***"}
+# plot an autocorrelation function of monthly mean ozone with 12 lags
+acf(monthly_mean, 
+    lag.max = 12,
+    main = "Monthly Mean Ozone Autocorrelation")
 ```
+Our autocorrelation plot describes how correlated monthly mean ozone values at any given month are with previous months. Each line represents the autocorrelation between month $t$ and month $t-i$. We can see that there is a statistically significant, positive correlation between month $t$ and months $t-2$, $t-11$, and $t-12$. There is a statistically significant, negative correlation between month $t$ and months $t-5$, $t-6$, $t-7$, and $t-8$. Intuitively, this checks out. If ozone concentrations are higher in the summer and lower in the winter, we expect monthly mean ozone values to be positively correlated with the months around them, and negatively correlated with months around 6 months away.
 
-```{r}
-# plot the lag components
-acf(monthly_mean, lag.max = 12)
-```
+## Discussion
 
--   There a statistically significant, positive correlation between lag t and lags t-2, t-11, and t-12.
+Based on the results of our regression analysis, we can assume that the relationship between ozone and tree canopy cover is more complex than what we've modeled. Further analysis might involve finding temperature and sunlight measurements for census tracts in LA County over the same temporal range as our ozone variable and adding them as independent variables in another multiple linear regression. Additionally, volatile organic compounds are not only emitted by trees, but by paint or even cooking. 
 
--   there is a statistically significant, negative correlation between lag t and lags t-5, t-6, t-7, and t-8.
+I believe an interesting but much more complex analysis would also track the seasonal variability of canopy cover. Trees emit VOCs through their leaves, but LA County has many deciduous trees that drop their leaves during winter. Although temperature and sunlight being lower in the winter likely drive the seasonality of ozone, could tree phenology also play a role?
 
--   What the prior research tells us is that ozone is higher in the summer due to increased temperature and sunlight, and now we can see the strength of the relationship
+## References
 
-    -   our data for cal enviroscreen is attempting to assign a score to each census tract, so it makes sense that the winter months are left out- we are only looking at the highest values for ozone
+###**Data**###
+
+***CalEnviroScreen 4.0***
+California Office of Environmental Health Hazards Assessment (2021). Accessed December 5, 2023:
+https://oehha.ca.gov/calenviroscreen/report/calenviroscreen-40
+
+***Tree Canopy Cover***
+Tree People and the Center for Urban Resilience (2021). Accessed December 5, 2023:
+https://la.myneighborhooddata.org/2021/10/tree-canopy-cover/
+
+***US EPA Air Quality System***
+United States Environmental Protection Agency (2023). Accessed December 5, 2023:
+https://www.epa.gov/outdoor-air-quality-data/download-daily-data
+
+###**Literature**
+
+1. Fischetti, Mark. "The Paradox of Pollution-Producing Trees". ***Scientific American*** (June 2014):
+https://www.scientificamerican.com/article/the-paradox-of-pollution-producing-trees/
+
+2. Fitsky, Anne Charlott, Hans Sanden, Thomas Karl, et al. "The Interplay Between Ozone and Urban Vegetation-BVOC Emissions, Ozone Deposition, and Tree Ecophysiology". ***Frontiers in Forests and Global Change**, vol. 2 (2019):
+https://doi.org/10.3389/ffgc.2019.00050
+
+
+
+Lastly - If you would like to read some rambling ruminations about forestry, check out this blog post, written during my time as a GrizzlyCorps Fellow in Trinity County, California:
+https://www.grizzlycorps.org/post/a-city-slicker-s-observations-on-more-foresty-forestry
+
